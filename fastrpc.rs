@@ -3,6 +3,12 @@ extern crate collections;
 extern crate num;
 
 use std::str;
+use collections::hashmap;
+use collections::hashmap::HashMap;
+use std::fmt;
+use std::fmt::Formatter;
+use std::fmt::Result;
+use std::io::IoError;
 
 mod b64 {
     #[inline]
@@ -104,12 +110,10 @@ mod b64 {
 
 mod frpc {
     use collections::hashmap::HashMap;
-    use std::str;
-    //use std::fmt::Formatter;
-    //use std::fmt::Result;
-    //use std::fmt::Show;
+    use std::fmt;
+    use std::io;
 
-    #[deriving(Eq, Show)]
+    #[deriving(Eq)]
     pub enum Value {
         Integer(i64),  // 1 = i32, 7 = +i64, 8 = -i64 
         Bool(bool),    // 2
@@ -125,10 +129,61 @@ mod frpc {
     #[deriving(Eq, Show)]
     pub enum RPC {
         Call(~str, Value), // 13 method call
-        Ok(Value),         // 14 method reponse
+        Success(Value),         // 14 method reponse
         Fault(i32, ~str),  // 15 fault response
     }
 
+    impl fmt::Show for Value {
+        fn fmt(&self, fmtr : &mut fmt::Formatter) -> fmt::Result {
+            match *self {
+                Integer(v) => v.fmt(fmtr),
+                Bool(v) => v.fmt(fmtr),
+                Double(v) => v.fmt(fmtr),
+                String(ref s) => {
+                    try!(fmtr.buf.write_char('"'));
+                    try!(s.fmt(fmtr));
+                    fmtr.buf.write_char('"')
+                },
+                Datetime => unimplemented!(),
+                Binary(_) => unimplemented!(),
+                Struct(ref v) => {
+                    try!(fmtr.buf.write_str("{"));
+                    let mut s : &'static str = "";
+                    for (key, val) in v.iter() {
+                        try!(fmtr.buf.write_str(s));
+                        try!(key.fmt(fmtr));
+                        try!(fmtr.buf.write_str(" : "));
+                        try!(val.fmt(fmtr));
+                        s = ", ";
+                    }
+                    fmtr.buf.write_str("}")
+                },
+                Array(ref v) => {
+                    try!(fmtr.buf.write_str("["));
+                    let mut s : &'static str = "";
+                    for item in v.iter() {
+                        try!(fmtr.buf.write_str(s));
+                        try!(item.fmt(fmtr));
+                        s = ", ";
+                    }
+                    fmtr.buf.write_str("]")
+                },
+                Null => fmtr.buf.write_str("null")
+            }
+        }
+    }
+
+    struct ParseContext<'r>{
+        pos : uint,
+        data : &'r [u8]
+    }
+
+    struct ParseError {
+        pos : uint,
+        reason : &'static str
+    }
+
+    // TODO return error
     fn decode_u32<'r>(data : &'r [u8], len : uint) -> (u32, &'r [u8]) {
         let mut val = 0u32;
         if len > 0 { val = data[0] as u32 }
@@ -138,6 +193,7 @@ mod frpc {
         (val, data.slice_from(len))
     }
 
+    // TODO return error
     fn decode_u64<'r>(data : &'r [u8], len : uint) -> (u64, &'r [u8]) {
         let mut val = 0u64;
         if len > 0 { val = data[0] as u64 }
@@ -151,12 +207,12 @@ mod frpc {
         (val, data.slice_from(len))
     }
 
-    fn decode_name<'r>(data : &'r[u8]) -> Option<(~str, &'r[u8])> {
+    fn decode_name<'r>(data : &'r[u8]) -> Option<(&'r str, &'r[u8])> {
         match data {
             [len, ..rest] if (rest.len() >= (len as uint)) => {
                 let len = len as uint;
-                let name = str::from_utf8(rest.slice(0, len)).unwrap();
-                Some((name.to_owned(), rest.slice_from(len)))
+                let name = ::std::str::from_utf8(rest.slice(0, len)).unwrap();
+                Some((name, rest.slice_from(len)))
             },
             _ => None
         }
@@ -180,7 +236,7 @@ mod frpc {
                 let len_size = (tag & 7) as uint + 1;
                 let (len, rest) = decode_u64(rest, len_size);
                 let len = len as uint;
-                let str = str::from_utf8(rest.slice(0, len)).unwrap();
+                let str = ::str::from_utf8(rest.slice(0, len)).unwrap();
                 Some((String(str.to_owned()), rest.slice_from(len)))
             },
             // [tag, ..rest] if (tag >> 3) == 5 => { None }, // Datetime
@@ -208,11 +264,11 @@ mod frpc {
                 let len_size = (tag & 7) as uint + 1;
                 let (len, mut rest) = decode_u64(rest, len_size);
                 let mut len = len as uint;
-                let mut values = HashMap::<~str, Value>::new();
+                let mut values = ::HashMap::<~str, Value>::with_capacity(len);
                 while len > 0 {
                     let (name, r) = decode_name(rest).unwrap();
                     match decode_value(r) {
-                        Some((v, r)) => { rest = r; values.insert(name, v); },
+                        Some((v, r)) => { rest = r; values.insert(name.to_owned(), v); },
                         None => return None
                     }
                     len -= 1;
@@ -224,7 +280,7 @@ mod frpc {
                 let len_size = (tag & 7) as uint + 1;
                 let (len, mut rest) = decode_u64(rest, len_size);
                 let mut len = len as uint;
-                let mut values = Vec::<Value>::new();
+                let mut values = Vec::<Value>::with_capacity(len);
                 while len > 0 {
                     match decode_value(rest) {
                         Some((v, r)) => { rest = r; values.push(v); },
@@ -253,7 +309,7 @@ mod frpc {
             // Success
             [tag, ..rest] if (tag >> 3) == 14 => {
                 let (value, _) = decode_value(rest).unwrap();
-                Some(Ok(value))
+                Some(Success(value))
             },
             // Fault
             //[tag, ..rest] if (tag >> 3) == 15 => {
