@@ -3,12 +3,7 @@ extern crate collections;
 extern crate num;
 
 use std::str;
-use collections::hashmap;
 use collections::hashmap::HashMap;
-use std::fmt;
-use std::fmt::Formatter;
-use std::fmt::Result;
-use std::io::IoError;
 
 mod b64 {
     #[inline]
@@ -111,7 +106,6 @@ mod b64 {
 mod frpc {
     use collections::hashmap::HashMap;
     use std::fmt;
-    use std::io;
 
     #[deriving(Eq)]
     pub enum Value {
