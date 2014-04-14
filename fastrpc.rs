@@ -74,7 +74,7 @@ mod b64 {
     pub fn decode_to_vec(input : &[u8]) -> Vec<u8> {
         let mut vec = Vec::<u8>::new();
         decode_with_callback(input,
-            |bytes| vec.extend(&mut bytes.iter().map(|x| *x))
+            |bytes| vec.extend(bytes.iter().map(|x| *x))
         );
         return vec;
     }
@@ -337,8 +337,12 @@ mod frpc {
 
 fn main() {
     let args = std::os::args_as_bytes();
-    let bytes = if args.len() > 1 {args[1]} else {std::io::stdin().read_to_end().unwrap()};
-    let data = b64::decode_to_vec(bytes);
+    let bytes = if args.len() > 1 {
+        args[1]
+    } else {
+        std::io::stdin().read_to_end().unwrap()
+    };
+    let data = b64::decode_to_vec(bytes.as_slice());
     let strct = frpc::decode(data.as_slice());
     //let str = match str::from_utf8(data.as_slice()) {
     //    None => fail!("Decoded string is not valid utf8"),
