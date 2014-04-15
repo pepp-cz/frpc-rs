@@ -72,7 +72,7 @@ fn test_decode_with_callback() {
     let mut vec = Vec::<u8>::new();
     decode_with_callback(
         [97, 71, 86, 115, 98, 71, 56, 104],
-        |bytes| vec.extend(&mut bytes.iter().map(|x| *x))
+        |bytes| vec.extend(bytes.iter().map(|x| *x))
     );
     assert_eq!(vec, vec!(104, 101, 108, 108, 111, 33))
 }
