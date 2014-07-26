@@ -1,5 +1,5 @@
 
-fastrpc: fastrpc.rs
+fastrpc: fastrpc.rs b64.rs frpc.rs
 	rustc fastrpc.rs
 
 fastrpc-test: fastrpc.rs b64.rs frpc.rs

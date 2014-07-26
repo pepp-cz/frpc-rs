@@ -1,75 +1,106 @@
 
+use std::mem::transmute;
+use std::raw::Slice;
+
 #[inline]
-fn decode_byte(byte : u8) -> (bool, u8) {
+fn decode_byte(byte : u8) -> u8 {
     match byte {
-        65..90 => (true, byte-65),   // A-Z
-        97..122 => (true, byte-97+26), // a-z
-        48..57 => (true, byte-48+52),  // 0-9
-        43 => (true, 62), // +
-        47 => (true, 63), // /
-        61 => (true, 0), // =
-        _ => (false, 0)
+        65..90  => byte-65,   // A-Z
+        97..122 => byte-97+26, // a-z
+        48..57  => byte-48+52,  // 0-9
+        43 => 62, // +
+        47 => 63, // /
+        61 => 0, // =
+        _ => 64 // signals invalid char
     }
 }
 
 #[inline]
-fn decode_quartet(input : [u8, ..4], cb : |&[u8]|) {
-        let mut buffer = [0u8, ..3];
-        let pos = 0;
-        let (mut valid, mut tmp) = decode_byte(input[pos]);
+fn decode_quartet(input : [u8, ..4]) -> Option<[u8, ..3]> {
+        let b1 = decode_byte(input[0]);
+        let b2 = decode_byte(input[1]);
+        let b3 = decode_byte(input[2]);
+        let b4 = decode_byte(input[3]);
         
-        let (byte_valid, value) = decode_byte(input[pos+1]);
-        valid = valid && byte_valid;
-        buffer[0] = (tmp << 2) | (value >> 4);
-        tmp = value & 0xF;
+        let buffer : [u8, ..3] = [
+            (b1 << 2) | (b2 >> 4),
+            (b2 << 4) | (b3 >> 2),
+            (b3 << 6) | b4
+        ];
 
-        let (byte_valid, value) = decode_byte(input[pos+2]);
-        valid = valid && byte_valid;
-        buffer[1] = (tmp << 4) | (value >> 2);
-        tmp = value & 0x3;
+        if (64u8 & (b1 | b2 | b3 | b4)) != 0 { return None }
 
-        let (byte_valid, value) = decode_byte(input[pos+3]);
-        valid = valid && byte_valid;
-        buffer[2] = (tmp << 6) | value;
+        Some(buffer)
+}
 
-        if !valid { fail!("Illegal characters") }
+#[inline]
+fn decode_octet(input : [u8, ..8]) -> Option<[u8, ..6]> {
+        let b1 = decode_byte(input[0]);
+        let b2 = decode_byte(input[1]);
+        let b3 = decode_byte(input[2]);
+        let b4 = decode_byte(input[3]);
+        let b5 = decode_byte(input[4]);
+        let b6 = decode_byte(input[5]);
+        let b7 = decode_byte(input[6]);
+        let b8 = decode_byte(input[7]);
+        
+        let buffer : [u8, ..6] = [
+            (b1 << 2) | (b2 >> 4),
+            (b2 << 4) | (b3 >> 2),
+            (b3 << 6) | (b4),
+            (b5 << 2) | (b6 >> 4),
+            (b6 << 4) | (b7 >> 2),
+            (b7 << 6) | (b8)
+        ];
 
-        cb(buffer);
+        if (64u8 & (b1 | b2 | b3 | b4 | b5 | b6 | b7 | b8)) != 0 { return None }
+
+        Some(buffer)
 }
 
 pub fn decode_with_callback(input : &[u8], cb : |&[u8]|) {
-    let mut to_decode = input.len();
-    // remove trailing '='
-    while to_decode > 0 && (input[to_decode - 1] == 61) { to_decode -= 1 }
+    let mut to_decode = input;
 
-    let mut pos = 0u;
-
-    while to_decode >= 4 { // decode four bytes to three
-        decode_quartet([input[pos], input[pos+1], input[pos+2], input[pos+3]], |bytes| cb(bytes));
-        pos += 4;
-        to_decode -= 4;
+    while to_decode.last().map_or(false, |c| *c == 61u8) {
+        to_decode = to_decode.init()
     }
 
-    match to_decode {
-        0 => (),
-        1 => fail!("Input of invalid length"),
-        2 => decode_quartet([input[pos], input[pos+1], 61, 61], |bytes| cb(bytes.slice(0,1))),
-        3 => decode_quartet([input[pos], input[pos+1], input[pos+2], 61], |bytes| cb(bytes.slice(0,2))),
+    while to_decode.len() >= 4 { // decode four bytes to three
+        let res = decode_quartet(unsafe {
+            let s : Slice<u8> = transmute(to_decode);
+            let a : &[u8, ..4] = transmute(s.data);
+            *a})
+                      .expect("Decoding failed");
+        cb(res);
+        to_decode = to_decode.slice_from(4);
+    }
+
+    let (len, res) = match to_decode {
+        [] => (0, Some([0, 0, 0])),
+        [_] => fail!("Input of invalid length"),
+        [a, b] => (1, decode_quartet([a, b, 61, 61])),
+        [a, b, c] => (2, decode_quartet([a, b, c, 61])),
         _ => fail!("impossible")
+    };
+    if len > 0 {
+        cb(res.expect("Decoding of trailing bytes failed").slice(0, len))
     }
 }
 
 pub fn decode_to_vec(input : &[u8]) -> Vec<u8> {
     let mut vec = Vec::<u8>::new();
     decode_with_callback(input,
-        |bytes| vec.extend(bytes.iter().map(|x| *x))
+        |bytes| {
+            println!("adding {} bytes", bytes.len());
+            vec.extend(bytes.iter().map(|x| *x))
+        }
     );
     return vec;
 }
 
 #[test]
 fn test_decode_with_callback() {
-    let mut vec = Vec::<u8>::new();
+    let mut vec = Vec::new();
     decode_with_callback(
         [97, 71, 86, 115, 98, 71, 56, 104],
         |bytes| vec.extend(bytes.iter().map(|x| *x))

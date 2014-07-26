@@ -7,10 +7,12 @@ mod frpc;
 
 fn main() {
     let args = std::os::args_as_bytes();
-    let bytes = if args.len() > 1 {
-        args[1]
+    let use_arg = args.len() > 1;
+    let input = if use_arg { Vec::new() } else {std::io::stdin().read_to_end().unwrap()};
+    let bytes = if use_arg {
+        args.get(1)
     } else {
-        std::io::stdin().read_to_end().unwrap()
+        &input
     };
     let data = b64::decode_to_vec(bytes.as_slice());
     let strct = frpc::decode(data.as_slice());
