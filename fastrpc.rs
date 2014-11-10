@@ -1,6 +1,5 @@
 
 extern crate collections;
-extern crate num;
 
 mod b64;
 mod frpc;
@@ -10,7 +9,7 @@ fn main() {
     let use_arg = args.len() > 1;
     let input = if use_arg { Vec::new() } else {std::io::stdin().read_to_end().unwrap()};
     let bytes = if use_arg {
-        args.get(1)
+        &args[1]
     } else {
         &input
     };

@@ -5,9 +5,9 @@ use std::raw::Slice;
 #[inline]
 fn decode_byte(byte : u8) -> u8 {
     match byte {
-        65..90  => byte-65,   // A-Z
-        97..122 => byte-97+26, // a-z
-        48..57  => byte-48+52,  // 0-9
+        65...90  => byte-65,   // A-Z
+        97...122 => byte-97+26, // a-z
+        48...57  => byte-48+52,  // 0-9
         43 => 62, // +
         47 => 63, // /
         61 => 0, // =
@@ -69,18 +69,17 @@ pub fn decode_with_callback(input : &[u8], cb : |&[u8]|) {
         let res = decode_quartet(unsafe {
             let s : Slice<u8> = transmute(to_decode);
             let a : &[u8, ..4] = transmute(s.data);
-            *a})
-                      .expect("Decoding failed");
+            *a}).expect("Decoding failed");
         cb(res);
         to_decode = to_decode.slice_from(4);
     }
 
     let (len, res) = match to_decode {
         [] => (0, Some([0, 0, 0])),
-        [_] => fail!("Input of invalid length"),
+        [_] => panic!("Input of invalid length"),
         [a, b] => (1, decode_quartet([a, b, 61, 61])),
         [a, b, c] => (2, decode_quartet([a, b, c, 61])),
-        _ => fail!("impossible")
+        _ => panic!("impossible")
     };
     if len > 0 {
         cb(res.expect("Decoding of trailing bytes failed").slice(0, len))

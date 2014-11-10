@@ -1,5 +1,5 @@
 
-use std::collections::hashmap::HashMap;
+use std::collections::HashMap;
 use std::fmt;
 use std::str;
 
@@ -8,7 +8,7 @@ pub enum Value {
     Integer(i64),  // 1 = i32, 7 = +i64, 8 = -i64 
     Bool(bool),    // 2
     Double(f64),   // 3 - little endian IEEE 754
-    String(String),  // 4
+    Text(String),  // 4
     Datetime,      // 5 - TODO
     Binary(Vec<u8>), // 6
     Struct(HashMap<String, Value>), // 10
@@ -29,7 +29,7 @@ impl fmt::Show for Value {
             Integer(v) => v.fmt(fmtr),
             Bool(v) => v.fmt(fmtr),
             Double(v) => v.fmt(fmtr),
-            String(ref s) => {
+            Text(ref s) => {
                 try!(fmtr.write_char('"').map_err(|_| fmt::WriteError));
                 try!(s.fmt(fmtr));
                 fmtr.write_char('"').map_err(|_| fmt::WriteError)
@@ -99,7 +99,7 @@ fn decode_u64<'r>(data : &'r [u8], len : uint) -> (u64, &'r [u8]) {
 
 fn decode_name<'r>(data : &'r[u8]) -> Option<(&'r str, &'r[u8])> {
     match data {
-        [len, ..rest] if (rest.len() >= (len as uint)) => {
+        [len, rest..] if (rest.len() >= (len as uint)) => {
             let len = len as uint;
             str::from_utf8(rest.slice(0, len))
                 .map(|name| (name, rest.slice_from(len)))
@@ -111,46 +111,46 @@ fn decode_name<'r>(data : &'r[u8]) -> Option<(&'r str, &'r[u8])> {
 fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
     match data {
         // Integer  - TODO is it legal in ver 2.0?
-        [tag, ..rest] if (tag >> 3) == 1 => {
+        [tag, rest..] if (tag >> 3) == 1 => {
             let len = (tag & 7) as uint;
             let (val, rest) = decode_u32(rest, len);
             Some((Integer(val as i32 as i64), rest))
         },
         // Bool
-        [tag, ..rest] if (tag >> 3) == 2 => {
+        [tag, rest..] if (tag >> 3) == 2 => {
             Some((Bool((tag & 1) == 1), rest))
         },
         //[tag, ..rest] if (tag >> 3) == 3 => { None }, // Double
-        // String
-        [tag, ..rest] if (tag >> 3) == 4 => {
+        // Text
+        [tag, rest..] if (tag >> 3) == 4 => {
             let len_size = (tag & 7) as uint + 1;
             let (len, rest) = decode_u64(rest, len_size);
             let len = len as uint;
             let str = str::from_utf8(rest.slice(0, len)).unwrap();
-            Some((String(str.to_owned()), rest.slice_from(len)))
+            Some((Text(str.into_string()), rest.slice_from(len)))
         },
         // [tag, ..rest] if (tag >> 3) == 5 => { None }, // Datetime
         // Binary
-        [tag, ..rest] if (tag >> 3) == 6 => {
+        [tag, rest..] if (tag >> 3) == 6 => {
             let len_size = (tag & 7) as uint + 1;
             let (len, rest) = decode_u64(rest, len_size);
             let len = len as uint;
-            Some((Binary(rest.slice(0, len).to_owned()), rest.slice_from(len)))
+            Some((Binary(rest.slice(0, len).to_vec()), rest.slice_from(len)))
         },
         // positive Integer8
-        [tag, ..rest] if (tag >> 3) == 7 => {
+        [tag, rest..] if (tag >> 3) == 7 => {
             let len = (tag & 7) as uint + 1;
             let (val, rest) = decode_u64(rest, len);
             Some((Integer(val as i64), rest))
         },
         // negative Integer8
-        [tag, ..rest] if (tag >> 3) == 8 => {
+        [tag, rest..] if (tag >> 3) == 8 => {
             let len = (tag & 7) as uint + 1;
             let (val, rest) = decode_u64(rest, len);
             Some((Integer(-(val as i64)), rest))
         },
         // Struct
-        [tag, ..rest] if (tag >> 3) == 10 => {
+        [tag, rest..] if (tag >> 3) == 10 => {
             let len_size = (tag & 7) as uint + 1;
             let (len, mut rest) = decode_u64(rest, len_size);
             let mut len = len as uint;
@@ -158,7 +158,7 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
             while len > 0 {
                 let (name, r) = decode_name(rest).unwrap();
                 match decode_value(r) {
-                    Some((v, r)) => { rest = r; values.insert(name.to_owned(), v); },
+                    Some((v, r)) => { rest = r; values.insert(name.into_string(), v); },
                     None => return None
                 }
                 len -= 1;
@@ -166,7 +166,7 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
             Some((Struct(values), rest))
         },
         // Array
-        [tag, ..rest] if (tag >> 3) == 11 => {
+        [tag, rest..] if (tag >> 3) == 11 => {
             let len_size = (tag & 7) as uint + 1;
             let (len, mut rest) = decode_u64(rest, len_size);
             let mut len = len as uint;
@@ -181,7 +181,7 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
             Some((Array(values), rest))
         },
         // Null
-        [tag, ..rest] if (tag >> 3) == 12 => {
+        [tag, rest..] if (tag >> 3) == 12 => {
             Some((Null, rest))
         },
         _ => None
@@ -191,13 +191,13 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
 fn decode_rpc(data : &[u8]) -> Option<RPC> {
     match data {
         // Call
-        [tag, ..rest] if (tag >> 3) == 13 => {
+        [tag, rest..] if (tag >> 3) == 13 => {
             let (name, rest) = decode_name(rest).unwrap();
             let (value, _) = decode_value(rest).unwrap();
-            Some(Call(name.to_owned(), value))
+            Some(Call(name.into_string(), value))
         }
         // Success
-        [tag, ..rest] if (tag >> 3) == 14 => {
+        [tag, rest..] if (tag >> 3) == 14 => {
             let (value, _) = decode_value(rest).unwrap();
             Some(Success(value))
         },
@@ -213,8 +213,8 @@ fn decode_rpc(data : &[u8]) -> Option<RPC> {
 
 pub fn decode(data : &[u8]) -> Option<RPC> {
     match data {
-        [0xCA, 0x11, 2, 0, ..rest] => decode_rpc(rest),
-        [..rest] => decode_rpc(rest)
+        [0xCA, 0x11, 2, 0, rest..] => decode_rpc(rest),
+        [rest..] => decode_rpc(rest)
     }
 }
 
