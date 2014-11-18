@@ -26,17 +26,17 @@ pub enum RPC {
 impl fmt::Show for Value {
     fn fmt(&self, fmtr : &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Integer(v) => v.fmt(fmtr),
-            Bool(v) => v.fmt(fmtr),
-            Double(v) => v.fmt(fmtr),
-            Text(ref s) => {
+            Value::Integer(v) => v.fmt(fmtr),
+            Value::Bool(v) => v.fmt(fmtr),
+            Value::Double(v) => v.fmt(fmtr),
+            Value::Text(ref s) => {
                 try!(fmtr.write_char('"').map_err(|_| fmt::WriteError));
                 try!(s.fmt(fmtr));
                 fmtr.write_char('"').map_err(|_| fmt::WriteError)
             },
-            Datetime => unimplemented!(),
-            Binary(_) => unimplemented!(),
-            Struct(ref v) => {
+            Value::Datetime => unimplemented!(),
+            Value::Binary(_) => unimplemented!(),
+            Value::Struct(ref v) => {
                 try!(fmtr.write_str("{").map_err(|_| fmt::WriteError));
                 let mut s : &'static str = "";
                 for (key, val) in v.iter() {
@@ -48,7 +48,7 @@ impl fmt::Show for Value {
                 }
                 fmtr.write_str("}").map_err(|_| fmt::WriteError)
             },
-            Array(ref v) => {
+            Value::Array(ref v) => {
                 try!(fmtr.write_str("[").map_err(|_| fmt::WriteError));
                 let mut s : &'static str = "";
                 for item in v.iter() {
@@ -58,7 +58,7 @@ impl fmt::Show for Value {
                 }
                 fmtr.write_str("]").map_err(|_| fmt::WriteError)
             },
-            Null => fmtr.write_str("null").map_err(|_| fmt::WriteError)
+            Value::Null => fmtr.write_str("null").map_err(|_| fmt::WriteError)
         }
     }
 }
@@ -114,11 +114,11 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
         [tag, rest..] if (tag >> 3) == 1 => {
             let len = (tag & 7) as uint;
             let (val, rest) = decode_u32(rest, len);
-            Some((Integer(val as i32 as i64), rest))
+            Some((Value::Integer(val as i32 as i64), rest))
         },
         // Bool
         [tag, rest..] if (tag >> 3) == 2 => {
-            Some((Bool((tag & 1) == 1), rest))
+            Some((Value::Bool((tag & 1) == 1), rest))
         },
         //[tag, ..rest] if (tag >> 3) == 3 => { None }, // Double
         // Text
@@ -127,7 +127,7 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
             let (len, rest) = decode_u64(rest, len_size);
             let len = len as uint;
             let str = str::from_utf8(rest.slice(0, len)).unwrap();
-            Some((Text(str.into_string()), rest.slice_from(len)))
+            Some((Value::Text(str.into_string()), rest.slice_from(len)))
         },
         // [tag, ..rest] if (tag >> 3) == 5 => { None }, // Datetime
         // Binary
@@ -135,19 +135,19 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
             let len_size = (tag & 7) as uint + 1;
             let (len, rest) = decode_u64(rest, len_size);
             let len = len as uint;
-            Some((Binary(rest.slice(0, len).to_vec()), rest.slice_from(len)))
+            Some((Value::Binary(rest.slice(0, len).to_vec()), rest.slice_from(len)))
         },
         // positive Integer8
         [tag, rest..] if (tag >> 3) == 7 => {
             let len = (tag & 7) as uint + 1;
             let (val, rest) = decode_u64(rest, len);
-            Some((Integer(val as i64), rest))
+            Some((Value::Integer(val as i64), rest))
         },
         // negative Integer8
         [tag, rest..] if (tag >> 3) == 8 => {
             let len = (tag & 7) as uint + 1;
             let (val, rest) = decode_u64(rest, len);
-            Some((Integer(-(val as i64)), rest))
+            Some((Value::Integer(-(val as i64)), rest))
         },
         // Struct
         [tag, rest..] if (tag >> 3) == 10 => {
@@ -163,7 +163,7 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
                 }
                 len -= 1;
             };
-            Some((Struct(values), rest))
+            Some((Value::Struct(values), rest))
         },
         // Array
         [tag, rest..] if (tag >> 3) == 11 => {
@@ -178,11 +178,11 @@ fn decode_value<'r>(data : &'r [u8]) -> Option<(Value, &'r [u8])> {
                 }
                 len -= 1;
             };
-            Some((Array(values), rest))
+            Some((Value::Array(values), rest))
         },
         // Null
         [tag, rest..] if (tag >> 3) == 12 => {
-            Some((Null, rest))
+            Some((Value::Null, rest))
         },
         _ => None
     }
@@ -194,12 +194,12 @@ fn decode_rpc(data : &[u8]) -> Option<RPC> {
         [tag, rest..] if (tag >> 3) == 13 => {
             let (name, rest) = decode_name(rest).unwrap();
             let (value, _) = decode_value(rest).unwrap();
-            Some(Call(name.into_string(), value))
+            Some(RPC::Call(name.into_string(), value))
         }
         // Success
         [tag, rest..] if (tag >> 3) == 14 => {
             let (value, _) = decode_value(rest).unwrap();
-            Some(Success(value))
+            Some(RPC::Success(value))
         },
         // Fault
         //[tag, ..rest] if (tag >> 3) == 15 => {
@@ -221,6 +221,6 @@ pub fn decode(data : &[u8]) -> Option<RPC> {
 #[test]
 fn test_decode() {
     assert_eq!(decode([0xca, 0x11, 2, 0]), None);
-    assert_eq!(decode([0xca, 0x11, 2, 0, 104, 4, 116, 101, 115, 116, 96]), Some(Call("test".to_string(), Null)))
+    assert_eq!(decode([0xca, 0x11, 2, 0, 104, 4, 116, 101, 115, 116, 96]), Some(RPC::Call("test".to_string(), Value::Null)))
 }
 
